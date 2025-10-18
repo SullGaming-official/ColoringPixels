@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ColoringPixels</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+      font-family: sans-serif;
+      background: #f0f0f0;
+    }
+    #blueBar {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 180px;
+      height: 50px;
+      background: #3D2CDE;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      color: lightblue;
+      border-bottom: 1px solid #ccc;
+    }
+    #sidebar {
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 180px;
+      height: 100%;
+      background: #3D2CDE;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 10px 4px;
+      box-sizing: border-box;
+      overflow-y: auto;
+    }
+    .tool {
+      margin: 4px;
+      padding: 4px 8px;
+      font-size: 14px;
+      cursor: pointer;
+      border-radius: 4px;
+      width: 100px;
+    }
+    #palette {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      margin-bottom: 5px;
+    }
+    .color {
+      width: 24px;
+      height: 24px;
+      margin: 2px;
+      cursor: pointer;
+      border: 1px solid #ccc;
+    }
+    #hexInput {
+      width: 100px;
+      text-align: center;
+      margin: 5px;
+      text-transform: uppercase;
+    }
+    #useHexBtn {
+      width: 100px;
+      margin-bottom: 10px;
+      cursor: pointer;
+      border-radius: 4px;
+      padding: 4px 8px;
+      font-weight: bold;
+    }
+    #zoomControlContainer {
+      margin-top: auto;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    #zoomControl {
+      width: 80px;
+      text-align: center;
+      margin-top: 5px;
+    }
+    canvas {
+      position: absolute;
+      top: 50px;
+      left: 0;
+      right: 180px;
+      bottom: 0;
+      display: block;
+      cursor: crosshair;
+    }
+    #deleteMenu {
+      display: none;
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      background: white;
+      border: 2px solid #3D2CDE;
+      border-radius: 8px;
+      padding: 10px;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+      z-index: 10;
+      flex-direction: column;
+      align-items: center;
+      gap: 5px;
+      max-height: 90vh;
+      overflow-y: auto;
+    }
+  </style>
+</head>
+<body>
+  <div id="blueBar">ColoringPixels. By SullGaming.</div>
+  <div id="sidebar">
+    <h1 style="color: lightblue">Colors</h1>
+    <div id="palette"></div>
+    <input id="hexInput" type="text" maxlength="6" value="000000" placeholder="HEX">
+    <button id="useHexBtn" onclick="applyHexColor()">Use Hex</button>
+    <h1 style="color: lightblue">Tools</h1>
+    <button class="tool" onclick="setTool('brush')">Brush</button>
+    <button class="tool" onclick="setTool('eraser')">Eraser</button>
+    <button class="tool" onclick="setTool('fill')">Fill</button>
+    <button class="tool" onclick="undo()">Undo</button>
+    <button class="tool" onclick="redo()">Redo</button>
+    <button class="tool" onclick="saveAsPNG()">Export as PNG</button>
+    <button class="tool" onclick="wipeBoard()">Wipe Board</button>
+    <h1 style="color: lightblue">Save
+Load
+Delete</h1>
+    <div id="saveLoadButtons"></div>
+    <button class="tool" style="background:#c00;color:white;" onclick="showDeleteMenu()">Delete Save Files</button>
+    <div id="zoomControlContainer">
+      <h1 style="color: lightblue">Zoom</h1>
+      <input id="zoomControl" type="number" value="10" oninput="resizeCanvas(true)" />
+    </div>
+  </div>
+  <canvas id="canvas"></canvas>
+  <div id="deleteMenu"></div>
+  <script>
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+    const size = 64;
+    let tileSize = 10, grid = [], tool = 'brush', currentColor = "#000000";
+    let drawing = false, history = [], redoStack = [];
+    let lastX = null, lastY = null;
+    for (let i = 0; i < size; i++) grid[i] = Array(size).fill("#ffffff");
+    function resizeCanvas(save = false) {
+      let zoomValue = document.getElementById("zoomControl").value.trim();
+      let v = parseFloat(zoomValue);
+      if (zoomValue === "" || isNaN(v)) v = 0; // Empty = 0
+      if (v < 0) v = 0; // No negatives
+      tileSize = v;
+      canvas.width = Math.min(window.innerWidth - 180, tileSize * size);
+      canvas.height = window.innerHeight - 50;
+      drawGrid();
+      if (save) autoSave();
+    }
+    window.addEventListener("resize", resizeCanvas);
+    function drawGrid() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          ctx.fillStyle = grid[y][x];
+          ctx.fillRect(x * tileSize, y * tileSize, tileSize, tileSize);
+          if (tileSize >= 1) {
+            ctx.strokeStyle = "#ddd";
+            ctx.strokeRect(x * tileSize, y * tileSize, tileSize, tileSize);
+          }
+        }
+      }
+    }
+    function saveState() {
+      history.push(JSON.parse(JSON.stringify(grid)));
+      redoStack = [];
+    }
+    function undo() { if (!history.length) return;
+      redoStack.push(grid); grid = history.pop(); drawGrid(); autoSave(); }
+    function redo() { if (!redoStack.length) return;
+      history.push(grid); grid = redoStack.pop(); drawGrid(); autoSave(); }
+    function drawLine(x0, y0, x1, y1, color) {
+      let dx = Math.abs(x1 - x0),
+          dy = Math.abs(y1 - y0),
+          sx = x0 < x1 ? 1 : -1,
+          sy = y0 < y1 ? 1 : -1,
+          err = dx - dy;
+      while (true) {
+        if (x0 >= 0 && y0 >= 0 && x0 < size && y0 < size) grid[y0][x0] = color;
+        if (x0 === x1 && y0 === y1) break;
+        let e2 = 2 * err;
+        if (e2 > -dy) { err -= dy; x0 += sx; }
+        if (e2 < dx) { err += dx; y0 += sy; }
+      }
+    }
+    function floodFill(x, y, target, replacement) {
+      if (target === replacement || grid[y][x] !== target) return;
+      grid[y][x] = replacement;
+      if (x > 0) floodFill(x - 1, y, target, replacement);
+      if (x < size - 1) floodFill(x + 1, y, target, replacement);
+      if (y > 0) floodFill(x, y - 1, target, replacement);
+      if (y < size - 1) floodFill(x, y + 1, target, replacement);
+    }
+    function handleDraw(e, isStart) {
+      const rect = canvas.getBoundingClientRect();
+      const x = Math.floor((e.clientX - rect.left) / tileSize);
+      const y = Math.floor((e.clientY - rect.top) / tileSize);
+      if (x < 0 || y < 0 || x >= size || y >= size) return;
+      if (isStart) { saveState(); lastX = x; lastY = y; }
+      if (tool === 'fill') {
+        floodFill(x, y, grid[y][x], currentColor);
+        drawGrid(); autoSave(); return;
+      }
+      if (!drawing) return;
+      const color = (tool === 'eraser') ? "#ffffff" : currentColor;
+      if (lastX !== null && lastY !== null) drawLine(lastX, lastY, x, y, color);
+      lastX = x; lastY = y;
+      drawGrid(); autoSave();
+    }
+    canvas.addEventListener("mousedown", e => {
+      if (e.button === 0) {
+        drawing = true;
+        handleDraw(e, true);
+      }
+    });
+    canvas.addEventListener("mousemove", e => { if (drawing) handleDraw(e, false); });
+    canvas.addEventListener("mouseup", () => { drawing = false; lastX = null; lastY = null; });
+    canvas.addEventListener("mouseleave", () => { drawing = false; });
+    canvas.addEventListener("touchstart", e => { e.preventDefault(); drawing = true; handleDraw(e.touches[0], true); });
+    canvas.addEventListener("touchmove", e => { e.preventDefault(); if (drawing) handleDraw(e.touches[0], false); });
+    canvas.addEventListener("touchend", () => { drawing = false; lastX = null; lastY = null; });
+    const colors = ["#D20103","#ff0000","#FF8484","#EC8E01","#ffa500","#FFDC9A","#E2C44B","#ffff00","#FFFFAE","#226308","#008000","#00ff00","#2227C3","#0000ff","#add8e6","#621079","#800080","#CC6CE7","#DCADB6","#ffc0cb","#FFF0F3","#A07D45","#c8a165","#EFD9B8","#ffffff","#d3d3d3","#808080","#5F5E5E","#000000"];
+    const pal = document.getElementById("palette");
+    colors.forEach(c => {
+      const sw = document.createElement("div");
+      sw.className = "color";
+      sw.style.background = c;
+      sw.onclick = () => { currentColor = c; document.getElementById('hexInput').value = c.replace("#", "").toUpperCase(); autoSave(); };
+      pal.appendChild(sw);
+    });
+    function applyHexColor() {
+      let v = document.getElementById("hexInput").value.trim().toUpperCase();
+      if (v.startsWith("#")) v = v.slice(1);
+      if (/^[0-9A-F]{3}$|^[0-9A-F]{6}$/.test(v)) {
+        currentColor = "#" + v;
+        autoSave();
+      } else {
+        alert("Invalid hex color! Use 3 or 6 hex digits.");
+      }
+    }
+    function setTool(t) { tool = t; autoSave(); }
+    const btns = document.getElementById("saveLoadButtons");
+    for (let i = 1; i <= 20; i++) {
+      const s = document.createElement("button");
+      s.className = "tool"; s.textContent = "Save " + i;
+      s.onclick = () => saveToSlot(i);
+      btns.appendChild(s);
+      const l = document.createElement("button");
+      l.className = "tool"; l.textContent = "Load " + i;
+      l.onclick = () => loadFromSlot(i);
+      btns.appendChild(l);
+    }
+    function saveToSlot(i) { localStorage.setItem('slot' + i, JSON.stringify({ grid, tool, color: currentColor, zoom: tileSize })); alert("Saved Slot " + i); }
+    function loadFromSlot(i) {
+      const d = JSON.parse(localStorage.getItem('slot' + i));
+      if (!d) return alert("No save in Slot " + i);
+      grid = d.grid; tool = d.tool; currentColor = d.color; tileSize = d.zoom;
+      document.getElementById('zoomControl').value = tileSize;
+      document.getElementById('hexInput').value = currentColor.replace("#", "").toUpperCase();
+      resizeCanvas(); drawGrid(); autoSave(); alert("Loaded Slot " + i);
+    }
+    function autoSave() { localStorage.setItem('autosave', JSON.stringify({ grid, tool, color: currentColor, zoom: tileSize })); }
+    function loadAutoSave() {
+      const d = JSON.parse(localStorage.getItem('autosave'));
+      if (!d) return;
+      grid = d.grid; tool = d.tool; currentColor = d.color; tileSize = d.zoom;
+      document.getElementById('zoomControl').value = tileSize;
+      document.getElementById('hexInput').value = currentColor.replace("#", "").toUpperCase();
+      resizeCanvas(); drawGrid();
+    }
+    function showDeleteMenu() {
+      const menu = document.getElementById("deleteMenu");
+      menu.innerHTML = "";
+      let found = false;
+      for (let i = 1; i <= 20; i++) {
+        if (localStorage.getItem('slot' + i)) {
+          found = true;
+          const b = document.createElement("button");
+          b.className = "tool"; b.textContent = "Delete Slot " + i;
+          b.onclick = () => {
+            if (confirm("Delete Slot " + i + "?")) {
+              localStorage.removeItem('slot' + i);
+              alert("Deleted Slot " + i);
+              menu.style.display = "none";
+            }
+          };
+          menu.appendChild(b);
+        }
+      }
+      if (localStorage.getItem('autosave')) {
+        found = true;
+        const a = document.createElement("button");
+        a.className = "tool"; a.textContent = "Delete Autosave";
+        a.onclick = () => {
+          if (confirm("Delete autosave?")) {
+            localStorage.removeItem('autosave');
+            alert("Autosave deleted.");
+            menu.style.display = "none";
+          }
+        };
+        menu.appendChild(a);
+      }
+      const c = document.createElement("button");
+      c.className = "tool"; c.textContent = "Cancel";
+      c.onclick = () => menu.style.display = "none";
+      menu.appendChild(c);
+      menu.style.display = "flex";
+      if (!found) { alert("No saved files found."); menu.style.display = "none"; }
+    }
+    function wipeBoard() { if (confirm("Clear board?")) { grid = Array.from({ length: size }, () => Array(size).fill("#ffffff")); drawGrid(); autoSave(); } }
+    function saveAsPNG() {
+      const id = Math.floor(1000000000000 + Math.random() * 9000000000000);
+      const filename = `ColoringPixels_${id}.png`;
+      const link = document.createElement("a");
+      link.href = canvas.toDataURL("image/png");
+      link.download = filename;
+      link.click();
+    }
+    loadAutoSave();
+    resizeCanvas();
+  </script>
+</body>
+</html>

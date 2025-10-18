@@ -1,0 +1,591 @@
+<html>
+<head>
+  <title>ColoringPixels</title>
+  <HTA:APPLICATION 
+    ID="ColorPixel"
+    APPLICATIONNAME="ColoringPixels"
+    BORDER="thin"
+    SCROLL="no"
+    SINGLEINSTANCE="yes"
+    WINDOWSTATE="normal"
+  />
+  <meta http-equiv="X-UA-Compatible" content="IE=9">
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+      font-family: sans-serif;
+      background: #f0f0f0;
+    }
+    #blueBar {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 180px;
+      height: 50px;
+      background: #3D2CDE;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      box-sizing: border-box;
+      z-index: 2;
+      border-bottom: 1px solid #ccc;
+    }
+    #sidebar {
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 180px;
+      height: 100%;
+      background: #3D2CDE;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 10px 4px;
+      box-sizing: border-box;
+      z-index: 1;
+      overflow-y: auto;
+    }
+    #palette {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      margin-bottom: 10px;
+    }
+    #tools {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .color {
+      width: 24px;
+      height: 24px;
+      margin: 2px;
+      cursor: pointer;
+      border: 1px solid #ccc;
+      box-sizing: border-box;
+    }
+    .tool {
+      margin: 4px;
+      padding: 4px 8px;
+      font-size: 14px;
+      cursor: pointer;
+      border-radius: 4px;
+      width: 100px;
+    }
+    #zoomControl {
+      margin-top: 8px;
+      width: 100px;
+    }
+    canvas {
+      position: absolute;
+      top: 50px;
+      left: 0;
+      right: 180px;
+      bottom: 0;
+      display: block;
+    }
+    #deleteMenuContent {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      width: 200px;
+      max-height: 80vh;
+      overflow-y: auto;
+    }
+  </style>
+</head>
+<body>
+  <div id="blueBar">
+    <p style="color: lightblue">ColoringPixels. By SullGaming.</p>
+  </div>
+  <div id="sidebar">
+    <h1 style="color: lightblue">Colors</h1>
+    <div id="palette"></div>
+      <div id="tools">
+        <h1 style="color: lightblue">Tools</h1>
+        <button class="tool" onclick="tool='brush'">Brush</button>
+        <button class="tool" onclick="tool='eraser'">Eraser</button>
+        <button class="tool" onclick="tool='fill'">Fill</button>
+        <button class="tool" onclick="undo()">Undo</button>
+        <button class="tool" onclick="redo()">Redo</button>
+        <button class="tool" onclick="saveAsPNG()">Export as PNG</button>
+        <button class="tool" onclick="wipeBoard()">Wipe Board</button>
+        <h1 style="color: lightblue">Save
+Load
+Delete</h1>
+        <script>
+          for (var i = 1; i <= 20; i++) {
+            document.write('<button class="tool" onclick="saveToSlot(' + i + ')">Save ' + i + '</button>');
+            document.write('<button class="tool" onclick="loadFromSlot(' + i + ')">Load ' + i + '</button>');
+          }
+        </script>
+        <button class="tool" style="background:#c00; color:white;" onclick="showDeleteMenu()">Delete Save Files</button>
+        <h1 style="color: lightblue">Zoom</h1>
+        <input id="zoomControl" type="range" min="4" max="20" value="10" onchange="resizeCanvas()" />
+      </div>
+    </div>
+  </div>
+  <canvas id="canvas"></canvas>
+  <div id="deleteMenu" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:10; justify-content:center; align-items:center;">
+    <div id="deleteMenuContent"></div>
+  </div>
+
+<script>
+var canvas = document.getElementById("canvas");
+var ctx = canvas.getContext("2d");
+var size = 64;
+var tileSize = 10;
+var tool = 'brush';
+var currentColor = "#000000";
+var drawing = false;
+var lastFill = null;
+var lastX = null;
+var lastY = null;
+var grid = [];
+var history = [];
+var redoStack = [];
+
+for (var i = 0; i < size; i++) {
+  grid[i] = [];
+  for (var j = 0; j < size; j++) {
+    grid[i][j] = "#ffffff";
+  }
+}
+
+function resizeCanvas() {
+  tileSize = parseInt(document.getElementById("zoomControl").value);
+  canvas.width = tileSize * size;
+  canvas.height = window.innerHeight - 50;
+  drawGrid();
+  autosave();
+}
+
+window.attachEvent("onresize", resizeCanvas);
+
+function drawGrid() {
+  for (var y = 0; y < size; y++) {
+    for (var x = 0; x < size; x++) {
+      ctx.fillStyle = grid[y][x];
+      ctx.fillRect(x * tileSize, y * tileSize, tileSize, tileSize);
+      ctx.strokeStyle = "#ddd";
+      ctx.strokeRect(x * tileSize, y * tileSize, tileSize, tileSize);
+    }
+  }
+}
+
+function saveState() {
+  history.push(JSON.parse(JSON.stringify(grid)));
+  if (history.length > 100) history.shift();
+  redoStack = [];
+}
+
+function undo() {
+  if (history.length === 0) return;
+  redoStack.push(JSON.parse(JSON.stringify(grid)));
+  grid = history.pop();
+  drawGrid();
+  autosave();
+}
+
+function redo() {
+  if (redoStack.length === 0) return;
+  history.push(JSON.parse(JSON.stringify(grid)));
+  grid = redoStack.pop();
+  drawGrid();
+  autosave();
+}
+
+function saveAsPNG() {
+  try {
+    var preservedTool = tool;
+
+    var dataURL = canvas.toDataURL("image/png").replace(/^data:image\/png;base64,/, "");
+    var shell = new ActiveXObject("WScript.Shell");
+    var fso = new ActiveXObject("Scripting.FileSystemObject");
+    var downloadsPath = shell.ExpandEnvironmentStrings("%USERPROFILE%") + "\\Downloads\\ColoringPixels_" + Date.now() + ".png";
+    var stream = new ActiveXObject("ADODB.Stream");
+    stream.Type = 1;
+    stream.Open();
+    stream.Write(decodeBase64(dataURL));
+    stream.SaveToFile(downloadsPath, 2);
+    stream.Close();
+
+    tool = preservedTool;
+    alert("Saved PNG to Downloads!");
+  } catch (e) {
+    alert("Export failed: " + e.message);
+  }
+}
+
+function decodeBase64(base64) {
+  var xml = new ActiveXObject("MSXML2.DOMDocument");
+  var node = xml.createElement("base64");
+  node.dataType = "bin.base64";
+  node.text = base64;
+  return node.nodeTypedValue;
+}
+
+function wipeBoard() {
+  if (!confirm("Are you sure you want to clear the entire board?")) return;
+  saveState();
+  for (var y = 0; y < size; y++) {
+    for (var x = 0; x < size; x++) {
+      grid[y][x] = "#ffffff";
+    }
+  }
+  drawGrid();
+  autosave();
+}
+
+function drawLine(x0, y0, x1, y1, color) {
+  var dx = Math.abs(x1 - x0);
+  var dy = Math.abs(y1 - y0);
+  var sx = (x0 < x1) ? 1 : -1;
+  var sy = (y0 < y1) ? 1 : -1;
+  var err = dx - dy;
+
+  while (true) {
+    if (x0 >= 0 && y0 >= 0 && x0 < size && y0 < size) {
+      grid[y0][x0] = color;
+    }
+    if (x0 === x1 && y0 === y1) break;
+    var e2 = 2 * err;
+    if (e2 > -dy) { err -= dy; x0 += sx; }
+    if (e2 < dx) { err += dx; y0 += sy; }
+  }
+}
+
+function floodFill(x, y, targetColor, replacementColor) {
+  if (targetColor === replacementColor || grid[y][x] !== targetColor) return;
+  grid[y][x] = replacementColor;
+  if (x > 0) floodFill(x - 1, y, targetColor, replacementColor);
+  if (x < size - 1) floodFill(x + 1, y, targetColor, replacementColor);
+  if (y > 0) floodFill(x, y - 1, targetColor, replacementColor);
+  if (y < size - 1) floodFill(x, y + 1, targetColor, replacementColor);
+}
+
+function handleDraw(e, isStart) {
+  var rect = canvas.getBoundingClientRect();
+  var x = Math.floor((e.clientX - rect.left) / tileSize);
+  var y = Math.floor((e.clientY - rect.top) / tileSize);
+  if (x < 0 || y < 0 || x >= size || y >= size) return;
+
+  if (isStart) {
+    saveState();
+    lastX = x;
+    lastY = y;
+  }
+
+  if (tool === 'fill') {
+    var key = x + "," + y;
+    if (lastFill !== key) {
+      floodFill(x, y, grid[y][x], currentColor);
+      lastFill = key;
+    }
+  } else {
+    lastFill = null;
+    var color = (tool === 'brush') ? currentColor : "#ffffff";
+    drawLine(lastX, lastY, x, y, color);
+    lastX = x;
+    lastY = y;
+  }
+
+  drawGrid();
+  autosave();
+}
+
+canvas.attachEvent("onmousedown", function(e) {
+  drawing = true;
+  handleDraw(e, true);
+});
+canvas.attachEvent("onmousemove", function(e) {
+  if (drawing) handleDraw(e, false);
+});
+canvas.attachEvent("onmouseup", function() {
+  drawing = false;
+  lastFill = null;
+  lastX = null;
+  lastY = null;
+});
+canvas.attachEvent("onmouseleave", function() {
+  drawing = false;
+  lastFill = null;
+  lastX = null;
+  lastY = null;
+});
+
+var paletteColors = [
+  "#D20103", "#ff0000", "#FF8484", "#EC8E01", "#ffa500", "#FFDC9A", "#E2C44B", "#ffff00", "#FFFFAE",
+  "#226308", "#008000", "#00ff00", "#2227C3", "#0000ff",  "#add8e6",  "#621079", "#800080", "#CC6CE7",
+  "#DCADB6", "#ffc0cb", "#FFF0F3", "#A07D45", "#c8a165", "#EFD9B8", "#ffffff", "#d3d3d3", "#808080",
+  "#5F5E5E", "#000000"
+];
+
+var palette = document.getElementById("palette");
+for (var i = 0; i < paletteColors.length; i++) {
+  var swatch = document.createElement("div");
+  swatch.className = "color";
+  swatch.style.background = paletteColors[i];
+swatch.onclick = (function(color) {
+  return function() {
+    currentColor = color;
+    document.getElementById("hexInput").value = color.replace(/^#/, ""); // 🧠 Show hex without #
+    autosave();
+  };
+})(paletteColors[i]);
+
+  palette.appendChild(swatch);
+}
+
+var hexContainer = document.createElement("div");
+hexContainer.style.width = "100%";
+hexContainer.style.display = "flex";
+hexContainer.style.flexDirection = "column";
+hexContainer.style.alignItems = "center";
+hexContainer.style.marginTop = "10px";
+var hexInput = document.createElement("input");
+hexInput.id = "hexInput";
+hexInput.type = "text";
+hexInput.placeholder = "FF00FF";
+hexInput.style.width = "80px";
+hexInput.style.textAlign = "center";
+hexInput.style.marginBottom = "4px";
+var hexButton = document.createElement("button");
+hexButton.className = "tool";
+hexButton.textContent = "Use Hex";
+hexButton.onclick = function() {
+  var value = hexInput.value.trim();
+  if (/^[0-9A-Fa-f]{6}$/.test(value)) {
+    value = "#" + value; // Add # if missing
+  } else if (/^#[0-9A-Fa-f]{6}$/.test(value)) {
+    // Already has #, do nothing
+  } else {
+    alert("Invalid hex code.");
+    return;
+  }
+  currentColor = value;
+  autosave();
+};
+
+hexContainer.appendChild(hexInput);
+hexContainer.appendChild(hexButton);
+palette.appendChild(hexContainer);
+
+function getUserPath() {
+  var shell = new ActiveXObject("WScript.Shell");
+  var fso = new ActiveXObject("Scripting.FileSystemObject");
+  var basePath = shell.ExpandEnvironmentStrings("%LOCALAPPDATA%") + "\\SullGaming\\";
+  var subPath = basePath + "ColoringPixels\\";
+  if (!fso.FolderExists(basePath)) fso.CreateFolder(basePath);
+  if (!fso.FolderExists(subPath)) fso.CreateFolder(subPath);
+  return subPath;
+}
+function autosave() {
+  try {
+    var fso = new ActiveXObject("Scripting.FileSystemObject");
+    var path = getUserPath() + "autosave.json";
+var data = {
+  grid: grid,
+  tool: tool,
+  color: currentColor,
+  zoom: tileSize,
+  hex: document.getElementById("hexInput").value.trim()
+};
+    var file = fso.CreateTextFile(path, true);
+    file.Write(JSON.stringify(data));
+    file.Close();
+  } catch (e) {}
+}
+
+setInterval(autosave, 30000);
+
+(function loadAutosave() {
+  try {
+    var fso = new ActiveXObject("Scripting.FileSystemObject");
+    var path = getUserPath() + "autosave.json";
+    if (!fso.FileExists(path)) return;
+
+    var file = fso.OpenTextFile(path, 1);
+    var data = JSON.parse(file.ReadAll());
+    file.Close();
+
+    grid = data.grid || grid;
+    tool = data.tool || 'brush';
+    currentColor = data.color || '#000000';
+
+    if (data.zoom) {
+      tileSize = data.zoom;
+      document.getElementById("zoomControl").value = tileSize;
+    }
+
+    if (data.hex) {
+      document.getElementById("hexInput").value = data.hex;
+
+      // Auto-apply hex color
+      if (/^[0-9A-Fa-f]{6}$/.test(data.hex)) {
+        currentColor = "#" + data.hex;
+      } else if (/^#[0-9A-Fa-f]{6}$/.test(data.hex)) {
+        currentColor = data.hex;
+      }
+    }
+  } catch (e) {
+    // Optional: alert("Autosave load failed: " + e.message);
+  }
+
+  resizeCanvas();
+})();
+
+function saveToSlot(slotNumber) {
+  try {
+    var fso = new ActiveXObject("Scripting.FileSystemObject");
+    var path = getUserPath() + "slot" + slotNumber + ".json";
+    if (fso.FileExists(path)) {
+      var confirmOverwrite = confirm("Slot " + slotNumber + " already contains a saved drawing.\nDo you want to overwrite it?");
+      if (!confirmOverwrite) return;
+    }
+    var data = {
+      grid: grid,
+      tool: tool,
+      color: currentColor,
+      zoom: tileSize
+    };
+    var file = fso.CreateTextFile(path, true);
+    file.Write(JSON.stringify(data));
+    file.Close();
+    alert("Saved to Slot " + slotNumber);
+  } catch (e) {
+    alert("Save failed: " + e.message);
+  }
+}
+
+function loadFromSlot(slotNumber) {
+  try {
+    var fso = new ActiveXObject("Scripting.FileSystemObject");
+    var path = getUserPath() + "slot" + slotNumber + ".json";
+    if (!fso.FileExists(path)) {
+      alert("No saved drawing in Slot " + slotNumber);
+      return;
+    }
+    var file = fso.OpenTextFile(path, 1);
+    var data = JSON.parse(file.ReadAll());
+    file.Close();
+    saveState();
+    grid = data.grid || grid;
+    tool = data.tool || 'brush';
+    currentColor = data.color || '#000000';
+    if (data.zoom) {
+      tileSize = data.zoom;
+      document.getElementById("zoomControl").value = tileSize;
+    }
+    resizeCanvas();
+    alert("Loaded Slot " + slotNumber);
+  } catch (e) {
+    alert("Load failed: " + e.message);
+  }
+}
+
+function showDeleteMenu() {
+  var fso = new ActiveXObject("Scripting.FileSystemObject");
+  var basePath = getUserPath();
+  var container = document.getElementById("deleteMenuContent");
+  container.innerHTML = "";
+  var foundAny = false;
+
+  for (var i = 1; i <= 20; i++) {
+    var path = basePath + "slot" + i + ".json";
+    if (fso.FileExists(path)) {
+      foundAny = true;
+      var btn = document.createElement("button");
+      btn.className = "tool";
+      btn.textContent = "Delete Slot " + i;
+      btn.onclick = (function(slot) {
+        return function() { deleteSlot(slot); };
+      })(i);
+      container.appendChild(btn);
+    }
+  }
+
+  var autosavePath = basePath + "autosave.json";
+  if (fso.FileExists(autosavePath)) {
+    foundAny = true;
+    var autoBtn = document.createElement("button");
+    autoBtn.className = "tool";
+    autoBtn.textContent = "Delete Autosave";
+    autoBtn.onclick = deleteAutosave;
+    container.appendChild(autoBtn);
+  }
+
+  var cancelBtn = document.createElement("button");
+  cancelBtn.className = "tool";
+  cancelBtn.textContent = "Cancel";
+  cancelBtn.onclick = hideDeleteMenu;
+  container.appendChild(cancelBtn);
+
+  if (foundAny) {
+    document.getElementById("deleteMenu").style.display = "flex";
+  } else {
+    alert("No saved slots or autosave found to delete.");
+  }
+}
+
+function hideDeleteMenu() {
+  document.getElementById("deleteMenu").style.display = "none";
+}
+
+function deleteSlot(slotNumber) {
+  try {
+    var fso = new ActiveXObject("Scripting.FileSystemObject");
+    var path = getUserPath() + "slot" + slotNumber + ".json";
+    if (!fso.FileExists(path)) {
+      alert("Slot " + slotNumber + " is already empty.");
+      return;
+    }
+    var confirmDelete = confirm("Are you sure you want to permanently delete Slot " + slotNumber + "?");
+    if (!confirmDelete) return;
+    fso.DeleteFile(path);
+    alert("Deleted Slot " + slotNumber);
+  } catch (e) {
+    alert("Delete failed: " + e.message);
+  } finally {
+    hideDeleteMenu();
+  }
+}
+
+function deleteAutosave() {
+  try {
+    var fso = new ActiveXObject("Scripting.FileSystemObject");
+    var path = getUserPath() + "autosave.json";
+    if (!fso.FileExists(path)) {
+      alert("Autosave is already empty.");
+      return;
+    }
+    var confirmDelete = confirm("Are you sure you want to permanently delete your autosave?");
+    if (!confirmDelete) return;
+    fso.DeleteFile(path);
+    alert("Deleted Autosave");
+  } catch (e) {
+    alert("Delete failed: " + e.message);
+  } finally {
+    hideDeleteMenu();
+  }
+}
+
+resizeCanvas();
+
+document.onkeydown = function(e) {
+  e = e || window.event;
+  if (e.keyCode === 13) {
+    return false;
+  }
+};
+</script>
+</body>
+</html>
